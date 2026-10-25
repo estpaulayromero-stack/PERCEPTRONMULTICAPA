@@ -1,0 +1,340 @@
+"""Perceptrón multicapa XOR (e1) - Juego visual.
+Requisitos: Python con tkinter (incluido) y Pillow:  pip install pillow
+Pon INICIO_PM.png y PRESENTACION_PM.png en la MISMA carpeta que este archivo.
+Ejecutar:  python perceptron_multicapa.py"""
+import math, os, tkinter as tk
+
+try:
+    from PIL import Image, ImageTk
+except ImportError:
+    Image = None
+
+BG, PANEL, TXT, MUT = "#0b1220", "#17233a", "#e2e8f0", "#94a3b8"
+ACC, GOOD, BAD, WARN = "#38bdf8", "#22c55e", "#ef4444", "#facc15"
+PAT = [((0, 1), 1), ((1, 0), 1), ((1, 1), 0), ((0, 0), 0)]   # e1..e4
+W1_0, W2_0 = [[0.3, 0.2], [0.6, -0.4]], [0.5, 0.7]            # datos del ejercicio
+MODOS = {"e1": "Solo e1 (0,1)→1", "lote": "XOR 4 patrones (lote)", "sec": "XOR 4 patrones (secuencial)"}
+
+
+def g(x):
+    return 1 / (1 + math.exp(-max(-60, min(60, x))))
+
+
+class MLP:
+    def __init__(s, W1, W2, alpha, modo):
+        s.W1, s.W2, s.alpha, s.modo = [r[:] for r in W1], W2[:], alpha, modo
+
+    def forward(s, x):
+        h = [g(x[0] * s.W1[0][j] + x[1] * s.W1[1][j]) for j in range(2)]
+        return h, g(h[0] * s.W2[0] + h[1] * s.W2[1])
+
+    def cambios(s, x, t):
+        h, o = s.forward(x)
+        do = o * (1 - o) * (t - o)                                   # F5
+        dh = [h[j] * (1 - h[j]) * s.W2[j] * do for j in range(2)]    # F7 (W2 viejo)
+        return ([[s.alpha * x[i] * dh[j] for j in range(2)] for i in range(2)],
+                [s.alpha * h[j] * do for j in range(2)])             # F8, F6
+
+    def aplica(s, d1, d2):
+        for j in range(2):
+            s.W2[j] += d2[j]
+            for i in range(2):
+                s.W1[i][j] += d1[i][j]
+
+    def ciclo(s):
+        if s.modo == "e1":
+            s.aplica(*s.cambios(*PAT[0]))
+        elif s.modo == "sec":
+            for x, t in PAT:
+                s.aplica(*s.cambios(x, t))
+        else:
+            T1, T2 = [[0, 0], [0, 0]], [0, 0]
+            for x, t in PAT:
+                d1, d2 = s.cambios(x, t)
+                for j in range(2):
+                    T2[j] += d2[j]
+                    for i in range(2):
+                        T1[i][j] += d1[i][j]
+            s.aplica(T1, T2)
+
+    def salidas(s):
+        return [s.forward(x)[1] for x, _ in PAT]
+
+    def mse(s):
+        return sum((t - o) ** 2 for (_, t), o in zip(PAT, s.salidas())) / 4
+
+    def convergio(s):
+        o = s.salidas()
+        if s.modo == "e1":
+            return o[0] >= 0.9
+        return all(abs(t - v) < 0.1 for (_, t), v in zip(PAT, o))
+
+
+def mezcla(v):
+    a, b = (30, 41, 59), (56, 189, 248)
+    return "#%02x%02x%02x" % tuple(int(a[k] + (b[k] - a[k]) * v) for k in range(3))
+
+
+def dibuja_red(c, m, x, t):
+    c.delete("all")
+    h, o = m.forward(x)
+    I, H, O = [(100, 120), (100, 320)], [(330, 120), (330, 320)], (560, 220)
+    for txt, px in (("ENTRADA", 100), ("CAPA OCULTA", 330), ("SALIDA", 560)):
+        c.create_text(px, 25, text=txt, fill=MUT, font=("Helvetica", 10, "bold"))
+
+    def arista(p, q, w, f):
+        c.create_line(*p, *q, fill=GOOD if w >= 0 else BAD, width=1 + min(7, abs(w) * 1.3))
+        lx, ly = p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f
+        tid = c.create_text(lx, ly, text=f"{w:.3f}", fill=TXT, font=("Consolas", 10, "bold"))
+        c.tag_lower(c.create_rectangle(c.bbox(tid), fill=BG, outline=""), tid)
+
+    for i in range(2):
+        for j in range(2):
+            arista(I[i], H[j], m.W1[i][j], 0.3)
+    for j in range(2):
+        arista(H[j], O, m.W2[j], 0.5)
+
+    def neurona(p, v, nombre, valtxt):
+        c.create_oval(p[0] - 38, p[1] - 38, p[0] + 38, p[1] + 38, fill=mezcla(v), outline=ACC, width=2)
+        c.create_text(*p, text=valtxt, fill="white", font=("Helvetica", 13, "bold"))
+        c.create_text(p[0], p[1] + 52, text=nombre, fill=MUT, font=("Helvetica", 10))
+
+    for i in range(2):
+        neurona(I[i], x[i], f"x{i + 1}", f"{x[i]}")
+    for j in range(2):
+        neurona(H[j], h[j], f"h{j + 1}", f"{h[j]:.3f}")
+    neurona(O, o, f"o1  (objetivo = {t})", f"{o:.3f}")
+
+
+def dibuja_barras(c, m):
+    c.delete("all")
+    for k, ((x, t), o) in enumerate(zip(PAT, m.salidas())):
+        y = 22 + k * 38
+        ok = abs(t - o) < 0.1 or (m.modo == "e1" and k == 0 and o >= 0.9)
+        c.create_text(8, y, anchor="w", text=f"e{k + 1} ({x[0]},{x[1]})→{t}", fill=TXT, font=("Consolas", 10))
+        c.create_rectangle(170, y - 11, 600, y + 11, fill=PANEL, outline="")
+        c.create_rectangle(170, y - 11, 170 + 430 * o, y + 11, fill=GOOD if ok else WARN, outline="")
+        c.create_line(170 + 430 * t, y - 15, 170 + 430 * t, y + 15, fill="white", width=3)
+        c.create_text(612, y, anchor="w", text=f"{o:.3f}", fill=TXT, font=("Consolas", 10, "bold"))
+
+
+class App:
+    def __init__(s):
+        s.r = tk.Tk()
+        s.r.title("Perceptrón multicapa XOR (e1) - UMNG")
+        s.r.geometry("1100x700")
+        s.r.configure(bg=BG)
+        s.f = None
+        s.portada()
+        s.r.mainloop()
+
+    def nueva(s):
+        if s.f:
+            s.f.destroy()
+        s.f = tk.Frame(s.r, bg=BG)
+        s.f.pack(fill="both", expand=True)
+        return s.f
+
+    def lbl(s, p, t, sz=12, col=TXT, b=False, **k):
+        return tk.Label(p, text=t, bg=k.pop("bg", BG), fg=col, font=("Helvetica", sz, "bold" if b else "normal"), **k)
+
+    def btn(s, p, t, cmd, col=ACC, w=14):
+        return tk.Button(p, text=t, command=cmd, bg=col, fg="#0b1220", font=("Helvetica", 11, "bold"),
+                         relief="flat", width=w, cursor="hand2", activebackground="white")
+
+    # ---------- 1. PORTADA ----------
+    def portada(s):
+        f = s.nueva()
+        s.r.geometry("1100x700")
+        ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "INICIO_PM.png")
+        if Image is None or not os.path.exists(ruta):
+            return s.portada_texto()               # sin imagen o sin Pillow: portada de texto
+        img = Image.open(ruta).resize((1100, 695), Image.LANCZOS)
+        s.img_portada = ImageTk.PhotoImage(img)    # guardar la referencia o la imagen desaparece
+        c = tk.Canvas(f, width=1100, height=695, highlightthickness=0, bd=0)
+        c.pack()
+        c.create_image(0, 0, image=s.img_portada, anchor="nw")
+
+        def sobre_boton(e):                        # zona del botón INICIAR dibujado en la imagen
+            return 376 <= e.x <= 722 and 422 <= e.y <= 497
+
+        c.bind("<Motion>", lambda e: c.config(cursor="hand2" if sobre_boton(e) else ""))
+        c.bind("<Button-1>", lambda e: s.presentacion() if sobre_boton(e) else None)
+
+    def portada_texto(s):
+        f = s.nueva()
+        s.lbl(f, "UNIVERSIDAD MILITAR NUEVA GRANADA", 14, MUT, True).pack(pady=(60, 5))
+        s.lbl(f, "Inteligencia Artificial", 12, MUT).pack()
+        s.lbl(f, "PERCEPTRÓN MULTICAPA", 38, ACC, True).pack(pady=(40, 0))
+        s.lbl(f, "XOR  (e1)", 38, TXT, True).pack()
+        s.lbl(f, "Integrantes", 13, WARN, True).pack(pady=(50, 8))
+        for n in ("Yessica Triana", "Danna Soler", "Paula Romero"):
+            s.lbl(f, n, 16).pack()
+        s.btn(f, "▶  JUGAR", s.presentacion, GOOD, 18).pack(pady=50)
+
+    # ---------- 2. PRESENTACIÓN ----------
+    def presentacion(s):
+        ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "PRESENTACION_PM.png")
+        if Image is None or not os.path.exists(ruta):
+            return s.presentacion_texto()          # sin imagen o sin Pillow: pantalla de texto
+        f = s.nueva()
+        s.r.geometry("1100x733")
+        img = Image.open(ruta).resize((1100, 733), Image.LANCZOS)
+        s.img_pres = ImageTk.PhotoImage(img)
+        c = tk.Canvas(f, width=1100, height=733, highlightthickness=0, bd=0)
+        c.pack()
+        c.create_image(0, 0, image=s.img_pres, anchor="nw")
+
+        def sobre_boton(e):                        # zona del botón EMPEZAR dibujado en la imagen
+            return 738 <= e.x <= 1006 and 635 <= e.y <= 689
+
+        c.bind("<Motion>", lambda e: c.config(cursor="hand2" if sobre_boton(e) else ""))
+        c.bind("<Button-1>", lambda e: s.juego() if sobre_boton(e) else None)
+
+    def presentacion_texto(s):
+        f = s.nueva()
+        m = MLP(W1_0, W2_0, 0.25, "e1")
+        s.lbl(f, "Conoce la red y su estado inicial", 22, ACC, True).pack(pady=12)
+        c = tk.Canvas(f, width=660, height=430, bg=BG, highlightthickness=0)
+        c.pack(side="left", padx=15)
+        dibuja_red(c, m, PAT[0][0], 1)
+        p = tk.Frame(f, bg=PANEL)
+        p.pack(side="left", fill="both", expand=True, padx=15, pady=10)
+        o = m.salidas()[0]
+        txt = ("🔵 Neuronas de ENTRADA (x1, x2): reciben el dato.\n"
+               "     Patrón e1:  x1 = 0,  x2 = 1.  Objetivo = 1\n\n"
+               "🔷 CAPA OCULTA (h1, h2): suman  Σ x·w  y aplican\n"
+               "     la sigmoide  g(x) = 1/(1+e^-x)\n\n"
+               "🟢 SALIDA (o1): combina h1 y h2 con W2.\n\n"
+               "Líneas VERDES = peso positivo, ROJAS = negativo;\n"
+               "más gruesa = más fuerte.\n\n"
+               f"ESTADO INICIAL (ciclo 0):\n   salida o1 = {o:.4f}   objetivo = 1\n"
+               f"   error = {1 - o:.4f}   α = 0.25   sin sesgos\n\n"
+               "Tu misión: entrenar la red (backpropagation)\n"
+               "para que la salida llegue a 1.")
+        tk.Label(p, text=txt, bg=PANEL, fg=TXT, justify="left", font=("Helvetica", 12)).pack(padx=15, pady=15, anchor="w")
+        s.btn(f, "EMPEZAR  ▶", s.juego, GOOD, 16).place(relx=0.55, rely=0.9)
+
+    # ---------- 3. JUEGO ----------
+    def juego(s):
+        f = s.nueva()
+        s.r.geometry("1100x700")
+        s.n, s.run, s.ref, s.meseta = 0, False, 1.0, False
+        s.m = MLP(W1_0, W2_0, 0.25, "e1")
+        izq = tk.Frame(f, bg=BG)
+        izq.pack(side="left", padx=10)
+        s.cn = tk.Canvas(izq, width=660, height=430, bg=BG, highlightthickness=0)
+        s.cn.pack()
+        s.cb = tk.Canvas(izq, width=700, height=170, bg=BG, highlightthickness=0)
+        s.cb.pack()
+        d = tk.Frame(f, bg=PANEL)
+        d.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        s.cl = s.lbl(d, "", 20, ACC, True, bg=PANEL)
+        s.cl.pack(pady=(10, 0))
+        s.ce = s.lbl(d, "", 11, MUT, bg=PANEL)
+        s.ce.pack()
+        s.st = tk.Label(d, text="", bg=PANEL, fg=WARN, font=("Helvetica", 12, "bold"), wraplength=330, height=3)
+        s.st.pack(pady=4)
+        s.lbl(d, "Ver patrón en la red:", 10, MUT, bg=PANEL).pack()
+        s.vp = tk.IntVar(value=0)
+        r = tk.Frame(d, bg=PANEL)
+        r.pack()
+        for k in range(4):
+            tk.Radiobutton(r, text=f"e{k + 1}", variable=s.vp, value=k, command=s.pinta, bg=PANEL, fg=TXT,
+                           selectcolor=BG, activebackground=PANEL).pack(side="left")
+        s.lbl(d, "Modo de entrenamiento:", 10, MUT, bg=PANEL).pack(pady=(8, 0))
+        s.modo = tk.StringVar(value="e1")
+        for k, v in MODOS.items():
+            tk.Radiobutton(d, text=v, variable=s.modo, value=k, command=s.reinicia, bg=PANEL, fg=TXT,
+                           selectcolor=BG, activebackground=PANEL, anchor="w").pack(fill="x", padx=20)
+        s.al = tk.Scale(d, from_=0.05, to=2.0, resolution=0.05, orient="horizontal", label="α (tasa de aprendizaje)",
+                        bg=PANEL, fg=TXT, highlightthickness=0, troughcolor=BG, command=lambda v: setattr(s.m, "alpha", float(v)))
+        s.al.set(0.25)
+        s.al.pack(fill="x", padx=20)
+        s.vel = tk.Scale(d, from_=1, to=1000, orient="horizontal", label="Ciclos por paso (velocidad)", bg=PANEL,
+                         fg=TXT, highlightthickness=0, troughcolor=BG)
+        s.vel.set(1)
+        s.vel.pack(fill="x", padx=20)
+        b = tk.Frame(d, bg=PANEL)
+        b.pack(pady=6)
+        s.btn(b, "▶ 1 ciclo", lambda: s.avanza(1), ACC, 11).grid(row=0, column=0, padx=3, pady=3)
+        s.pl = s.btn(b, "⏵ Auto", s.auto, GOOD, 11)
+        s.pl.grid(row=0, column=1, padx=3, pady=3)
+        s.btn(b, "↺ Reiniciar", s.reinicia, WARN, 11).grid(row=0, column=2, padx=3, pady=3)
+        s.lbl(d, "Pesos iniciales (editables):", 10, MUT, bg=PANEL).pack()
+        g_ = tk.Frame(d, bg=PANEL)
+        g_.pack()
+        s.en = {}
+        for k, (nom, val) in enumerate([("w11", .3), ("w12", .2), ("w21", .6), ("w22", -.4), ("v1", .5), ("v2", .7)]):
+            tk.Label(g_, text=nom, bg=PANEL, fg=TXT).grid(row=k // 3, column=(k % 3) * 2)
+            e = tk.Entry(g_, width=6, justify="center")
+            e.insert(0, str(val))
+            e.grid(row=k // 3, column=(k % 3) * 2 + 1, padx=2, pady=2)
+            s.en[nom] = e
+        s.btn(d, "Aplicar pesos y reiniciar", s.reinicia, ACC, 24).pack(pady=4)
+        s.btn(d, "Volver a datos del ejercicio", s.datos, MUT, 24).pack()
+        s.pinta()
+
+    def datos(s):
+        for nom, v in zip(s.en, (.3, .2, .6, -.4, .5, .7)):
+            s.en[nom].delete(0, "end")
+            s.en[nom].insert(0, str(v))
+        s.al.set(0.25)
+        s.reinicia()
+
+    def reinicia(s):
+        s.run = False
+        s.pl.config(text="⏵ Auto")
+        try:
+            v = [float(s.en[k].get()) for k in s.en]
+        except ValueError:
+            s.st.config(text="Escribe números válidos en los pesos", fg=BAD)
+            return
+        s.m = MLP([[v[0], v[1]], [v[2], v[3]]], [v[4], v[5]], s.al.get(), s.modo.get())
+        s.n, s.ref, s.meseta = 0, s.m.mse(), False
+        s.pinta()
+
+    def auto(s):
+        s.run = not s.run
+        s.pl.config(text="⏸ Pausa" if s.run else "⏵ Auto")
+        if s.run:
+            s.tick()
+
+    def tick(s):
+        if s.run:
+            s.avanza(s.vel.get())
+            s.r.after(40, s.tick)
+
+    def avanza(s, k):
+        if s.m.convergio():
+            return
+        for _ in range(k):
+            s.m.ciclo()
+            s.n += 1
+            if s.m.convergio():
+                break
+        if s.n % 1000 < k:                      # revisa meseta cada ~1000 ciclos
+            s.meseta = abs(s.m.mse() - s.ref) < 2e-4
+            s.ref = s.m.mse()
+        s.pinta()
+
+    def pinta(s):
+        x, t = PAT[s.vp.get()]
+        dibuja_red(s.cn, s.m, x, t)
+        dibuja_barras(s.cb, s.m)
+        s.cl.config(text=f"Ciclo {s.n}")
+        s.ce.config(text=f"Error cuadrático medio (MSE) = {s.m.mse():.5f}")
+        if s.m.convergio():
+            s.run = False
+            s.pl.config(text="⏵ Auto")
+            s.st.config(text=f"🎉 ¡CONVERGIÓ en el ciclo {s.n}!\nLa salida ya está en {'1' if s.m.modo == 'e1' else 'su objetivo'}", fg=GOOD)
+        elif s.n == 0:
+            s.st.config(text="Estado inicial. Pulsa ▶ 1 ciclo o ⏵ Auto", fg=WARN)
+        elif s.n > 1000 and s.meseta:
+            s.st.config(text="⚠ Meseta: el error casi no baja.\nSigue, sube la velocidad o cambia α / pesos", fg=WARN)
+        else:
+            s.st.config(text="Entrenando…", fg=ACC)
+
+
+if __name__ == "__main__":
+    App()
