@@ -184,10 +184,9 @@ class App:
         c = tk.Canvas(f, width=1100, height=733, highlightthickness=0, bd=0)
         c.pack()
         c.create_image(0, 0, image=s.img_pres, anchor="nw")
-
         def sobre_boton(e):                        # zona del botón EMPEZAR dibujado en la imagen
-            return 738 <= e.x <= 1006 and 635 <= e.y <= 689
-
+            return 736 <= e.x <= 1004 and 601 <= e.y <= 659
+        
         c.bind("<Motion>", lambda e: c.config(cursor="hand2" if sobre_boton(e) else ""))
         c.bind("<Button-1>", lambda e: s.juego() if sobre_boton(e) else None)
 
