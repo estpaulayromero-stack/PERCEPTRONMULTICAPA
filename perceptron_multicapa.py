@@ -1,3 +1,6 @@
+##Hecho por:Paula,Danna y Yessica
+##----------------PERCEPTRON MULTICAPA-----------------------
+
 """Perceptrón multicapa XOR (e1) - Juego visual.
 Requisitos: Python con tkinter (incluido) y Pillow:  pip install pillow
 Pon INICIO_PM.png y PRESENTACION_PM.png en la MISMA carpeta que este archivo.
@@ -14,6 +17,7 @@ ACC, GOOD, BAD, WARN = "#38bdf8", "#22c55e", "#ef4444", "#facc15"
 CARPETA = os.path.dirname(os.path.abspath(__file__))
 X, T = (0, 1), 1                                   # patrón e1: x1=0, x2=1, objetivo 1
 W1_0, W2_0, ALPHA_0 = [[0.3, 0.2], [0.6, -0.4]], [0.5, 0.7], 0.25   # datos del ejercicio
+B1_0, B2_0 = [0.1, 0.1], 0.1                         # sesgos de capa oculta y salida
 METAS = ["0.90", "0.95", "0.99", "0.999"]
 MAX_CICLOS = 2_000_000
 
@@ -23,12 +27,13 @@ def g(x):
 
 
 class MLP:
-    def __init__(self, W1, W2, alpha):
+    def __init__(self, W1, W2, alpha, B1, B2):
         self.W1, self.W2, self.alpha = [r[:] for r in W1], W2[:], alpha
+        self.B1, self.B2 = B1[:], B2
 
     def forward(self):
-        h = [g(X[0] * self.W1[0][j] + X[1] * self.W1[1][j]) for j in range(2)]      # F1, F2
-        return h, g(h[0] * self.W2[0] + h[1] * self.W2[1])                          # F3, F4
+        h = [g(X[0] * self.W1[0][j] + X[1] * self.W1[1][j] + self.B1[j]) for j in range(2)]
+        return h, g(h[0] * self.W2[0] + h[1] * self.W2[1] + self.B2)
 
     def salida(self):
         return self.forward()[1]
@@ -40,8 +45,10 @@ class MLP:
         dh = [h[j] * (1 - h[j]) * self.W2[j] * do for j in range(2)]     # F7 (con W2 viejo)
         for j in range(2):
             self.W2[j] += self.alpha * h[j] * do                            # F6
+            self.B1[j] += self.alpha * dh[j]
             for i in range(2):
                 self.W1[i][j] += self.alpha * X[i] * dh[j]                  # F8
+        self.B2 += self.alpha * do
 
 
 def mezcla(v):
@@ -68,16 +75,18 @@ def dibuja_red(c, m):
     for j in range(2):
         arista(H[j], O, m.W2[j], 0.5)
 
-    def neurona(p, v, nombre, texto):
+    def neurona(p, v, nombre, texto, sesgo=None):
         c.create_oval(p[0] - 38, p[1] - 38, p[0] + 38, p[1] + 38, fill=mezcla(v), outline=ACC, width=2)
         c.create_text(*p, text=texto, fill="white", font=("Helvetica", 12, "bold"))
         c.create_text(p[0], p[1] + 52, text=nombre, fill=MUT, font=("Helvetica", 10))
+        if sesgo is not None:
+            c.create_text(p[0], p[1] + 69, text=f"sesgo={sesgo:.4f}", fill=WARN, font=("Consolas", 9))
 
     for i in range(2):
         neurona(I[i], X[i], f"x{i + 1}", str(X[i]))
     for j in range(2):
-        neurona(H[j], h[j], f"h{j + 1}", f"{h[j]:.3f}")
-    neurona(O, o, f"o1  (objetivo = {T})", f"{o:.4f}")
+        neurona(H[j], h[j], f"h{j + 1}", f"{h[j]:.4f}", m.B1[j])
+    neurona(O, o, f"o1  (objetivo = {T})", f"{o:.4f}", m.B2)
 
 
 def dibuja_grafica(c, hist, meta, o):
@@ -164,7 +173,7 @@ class App:
     def juego(self):
         f = self.nueva("1100x700")
         self.run = False
-        self.m = MLP(W1_0, W2_0, ALPHA_0)
+        self.m = MLP(W1_0, W2_0, ALPHA_0, B1_0, B2_0)
         self.n, self.hist = 0, [(0, self.m.salida())]
         izq = tk.Frame(f, bg=BG)
         izq.pack(side="left", padx=10)
@@ -214,11 +223,13 @@ class App:
         self.lbl(fn, "ciclos").pack(side="left")
         self.btn(fn, "Ir", self.ir, ACC, 5).pack(side="left", padx=6)
 
-        self.lbl(d, "Pesos iniciales (editables):", 10, MUT).pack(pady=(8, 0))
+        self.lbl(d, "Pesos y sesgos iniciales (editables):", 10, MUT).pack(pady=(8, 0))
         gp = tk.Frame(d, bg=PANEL)
         gp.pack()
         self.en = {}
-        for k, (nom, val) in enumerate(zip(("w11", "w12", "w21", "w22", "v1", "v2"), (.3, .2, .6, -.4, .5, .7))):
+        valores = (.3, .2, .6, -.4, .5, .7, .1, .1, .1)
+        nombres = ("w11", "w12", "w21", "w22", "v1", "v2", "bh1", "bh2", "bo1")
+        for k, (nom, val) in enumerate(zip(nombres, valores)):
             tk.Label(gp, text=nom, bg=PANEL, fg=TXT).grid(row=k // 3, column=(k % 3) * 2)
             e = tk.Entry(gp, width=6, justify="center")
             e.insert(0, str(val))
@@ -236,7 +247,7 @@ class App:
             self.m.alpha = float(v)
 
     def datos(self):
-        for nom, v in zip(self.en, (.3, .2, .6, -.4, .5, .7)):
+        for nom, v in zip(self.en, (.3, .2, .6, -.4, .5, .7, .1, .1, .1)):
             self.en[nom].delete(0, "end")
             self.en[nom].insert(0, str(v))
         self.al.set(ALPHA_0)
@@ -250,7 +261,8 @@ class App:
         except ValueError:
             self.st.config(text="Escribe números válidos en los pesos", fg=BAD)
             return
-        self.m = MLP([[v[0], v[1]], [v[2], v[3]]], [v[4], v[5]], self.al.get())
+        self.m = MLP([[v[0], v[1]], [v[2], v[3]]], [v[4], v[5]], self.al.get(),
+                     [v[6], v[7]], v[8])
         self.n, self.hist = 0, [(0, self.m.salida())]
         self.pinta()
 
