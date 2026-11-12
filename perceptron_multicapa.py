@@ -1,7 +1,7 @@
 ##Hecho por:Paula,Danna y Yessica
 ##----------------PERCEPTRON MULTICAPA-----------------------
 
-"""Perceptrón multicapa XOR (e1) - Juego visual.
+"""Perceptrón multicapa XOR: demostración de e1 y entrenamiento del conjunto completo.
 Requisitos: Python con tkinter (incluido) y Pillow:  pip install pillow
 Pon INICIO_PM.png y PRESENTACION_PM.png en la MISMA carpeta que este archivo.
 Ejecutar:  python perceptron_multicapa.py"""
@@ -18,8 +18,9 @@ CARPETA = os.path.dirname(os.path.abspath(__file__))
 X, T = (0, 1), 1                                   # patrón e1: x1=0, x2=1, objetivo 1
 W1_0, W2_0, ALPHA_0 = [[0.3, 0.2], [0.6, -0.4]], [0.5, 0.7], 0.25   # datos del ejercicio
 B1_0, B2_0 = [0.1, 0.1], 0.1                         # sesgos de capa oculta y salida
-METAS = ["0.90", "0.95", "0.99", "0.999"]
-MAX_CICLOS = 2_000_000
+DATOS_XOR = ((0, 1, 1), (1, 0, 1), (1, 1, 0), (0, 0, 0))
+META_MSE = 0.01
+MAX_EPOCAS = 100_000
 
 
 def g(x):
@@ -31,34 +32,61 @@ class MLP:
         self.W1, self.W2, self.alpha = [r[:] for r in W1], W2[:], alpha
         self.B1, self.B2 = B1[:], B2
 
-    def forward(self):
-        h = [g(X[0] * self.W1[0][j] + X[1] * self.W1[1][j] + self.B1[j]) for j in range(2)]
+    def forward(self, x=X):
+        h = [g(x[0] * self.W1[0][j] + x[1] * self.W1[1][j] + self.B1[j]) for j in range(2)]
         return h, g(h[0] * self.W2[0] + h[1] * self.W2[1] + self.B2)
 
-    def salida(self):
-        return self.forward()[1]
+    def salida(self, x=X):
+        return self.forward(x)[1]
 
-    def paso(self):
-        """Un ciclo: forward + backpropagation (F5-F8) con el patrón e1."""
-        h, o = self.forward()
-        do = o * (1 - o) * (T - o)                                    # F5
-        dh = [h[j] * (1 - h[j]) * self.W2[j] * do for j in range(2)]     # F7 (con W2 viejo)
+    def mse(self):
+        return sum((target - self.salida((x1, x2))) ** 2 for x1, x2, target in DATOS_XOR) / len(DATOS_XOR)
+
+    def paso(self, x=X, target=T):
+        """Un paso de retropropagación para un patrón, como el ejemplo e1."""
+        h, o = self.forward(x)
+        do = o * (1 - o) * (target - o)
+        dh = [h[j] * (1 - h[j]) * self.W2[j] * do for j in range(2)]
         for j in range(2):
-            self.W2[j] += self.alpha * h[j] * do                            # F6
+            self.W2[j] += self.alpha * h[j] * do
             self.B1[j] += self.alpha * dh[j]
             for i in range(2):
-                self.W1[i][j] += self.alpha * X[i] * dh[j]                  # F8
+                self.W1[i][j] += self.alpha * x[i] * dh[j]
         self.B2 += self.alpha * do
 
+    def entrenar_epoca(self):
+        """Acumula gradientes de todos los patrones y actualiza una vez por época."""
+        grad_w1 = [[0.0, 0.0], [0.0, 0.0]]
+        grad_w2, grad_b1, grad_b2 = [0.0, 0.0], [0.0, 0.0], 0.0
+        for x1, x2, target in DATOS_XOR:
+            x = (x1, x2)
+            h, o = self.forward(x)
+            do = o * (1 - o) * (target - o)
+            dh = [h[j] * (1 - h[j]) * self.W2[j] * do for j in range(2)]
+            for j in range(2):
+                grad_w2[j] += h[j] * do
+                grad_b1[j] += dh[j]
+                for i in range(2):
+                    grad_w1[i][j] += x[i] * dh[j]
+            grad_b2 += do
+
+        n = len(DATOS_XOR)
+        for j in range(2):
+            self.W2[j] += self.alpha * grad_w2[j] / n
+            self.B1[j] += self.alpha * grad_b1[j] / n
+            for i in range(2):
+                self.W1[i][j] += self.alpha * grad_w1[i][j] / n
+        self.B2 += self.alpha * grad_b2 / n
+        return self.mse()
 
 def mezcla(v):
     a, b = (30, 41, 59), (56, 189, 248)
     return "#%02x%02x%02x" % tuple(int(a[k] + (b[k] - a[k]) * v) for k in range(3))
 
 
-def dibuja_red(c, m):
+def dibuja_red(c, m, x=X, objetivo=T):
     c.delete("all")
-    h, o = m.forward()
+    h, o = m.forward(x)
     I, H, O = [(100, 120), (100, 320)], [(330, 120), (330, 320)], (560, 220)
     for txt, px in (("ENTRADA", 100), ("CAPA OCULTA", 330), ("SALIDA", 560)):
         c.create_text(px, 25, text=txt, fill=MUT, font=("Helvetica", 10, "bold"))
@@ -83,46 +111,54 @@ def dibuja_red(c, m):
             c.create_text(p[0], p[1] + 69, text=f"sesgo={sesgo:.4f}", fill=WARN, font=("Consolas", 9))
 
     for i in range(2):
-        neurona(I[i], X[i], f"x{i + 1}", str(X[i]))
+        neurona(I[i], x[i], f"x{i + 1}", str(x[i]))
     for j in range(2):
         neurona(H[j], h[j], f"h{j + 1}", f"{h[j]:.4f}", m.B1[j])
-    neurona(O, o, f"o1  (objetivo = {T})", f"{o:.4f}", m.B2)
+    neurona(O, o, f"o1  (objetivo = {objetivo})", f"{o:.4f}", m.B2)
 
 
-def dibuja_grafica(c, hist, meta, o):
-    """Barra de la salida actual + curva de la salida a lo largo de los ciclos."""
+def dibuja_grafica(c, hist, m):
     c.delete("all")
-    c.create_text(8, 18, anchor="w", text="Salida o1", fill=TXT, font=("Helvetica", 11, "bold"))
-    c.create_rectangle(100, 8, 560, 28, fill=PANEL, outline="")
-    c.create_rectangle(100, 8, 100 + 460 * o, 28, fill=GOOD if o >= meta else ACC, outline="")
-    c.create_line(100 + 460 * meta, 3, 100 + 460 * meta, 33, fill=WARN, width=3)
-    c.create_line(560, 3, 560, 33, fill="white", width=2)
-    c.create_text(570, 18, anchor="w", text=f"{o:.5f}", fill=TXT, font=("Consolas", 11, "bold"))
-    c.create_text(100 + 460 * meta, 43, text=f"meta {meta}", fill=WARN, font=("Helvetica", 9))
-    x0, x1, y0, y1 = 55, 640, 70, 190
-    ymin = math.floor(min(p[1] for p in hist) * 10) / 10
-    ymin = min(ymin, 0.6)
+    c.create_text(8, 12, anchor="w", text=f"MSE: {m.mse():.5f}  (meta ≤ {META_MSE})",
+                  fill=TXT, font=("Helvetica", 10, "bold"))
+    x0, x1, y0, y1 = 55, 640, 30, 112
+    ymax = max(META_MSE * 1.2, max(value for _, value in hist) * 1.05)
     xmax = max(hist[-1][0], 1)
-    px = lambda n: x0 + (x1 - x0) * n / xmax
-    py = lambda v: y1 - (y1 - y0) * (v - ymin) / (1 - ymin)
+    px = lambda epoch: x0 + (x1 - x0) * epoch / xmax
+    py = lambda value: y1 - (y1 - y0) * value / ymax
     c.create_rectangle(x0, y0, x1, y1, outline=PANEL)
-    c.create_line(x0, py(meta), x1, py(meta), fill=WARN, dash=(4, 3))
-    c.create_text(8, 58, anchor="w", text="Salida vs ciclos", fill=MUT, font=("Helvetica", 9, "bold"))
-    for v in (ymin, 1.0):
-        c.create_text(x0 - 5, py(v), anchor="e", text=f"{v:.1f}", fill=MUT, font=("Consolas", 9))
-    c.create_text(x0, y1 + 12, text="0", fill=MUT, font=("Consolas", 9))
-    c.create_text(x1, y1 + 12, text=f"ciclo {xmax}", fill=MUT, font=("Consolas", 9), anchor="e")
+    c.create_line(x0, py(META_MSE), x1, py(META_MSE), fill=WARN, dash=(4, 3))
+    c.create_text(8, 24, anchor="w", text="MSE por época", fill=MUT, font=("Helvetica", 9, "bold"))
+    c.create_text(x0 - 5, y0, anchor="e", text=f"{ymax:.2f}", fill=MUT, font=("Consolas", 8))
+    c.create_text(x0 - 5, y1, anchor="e", text="0", fill=MUT, font=("Consolas", 8))
+    c.create_text(x0, y1 + 10, text="0", fill=MUT, font=("Consolas", 8))
+    c.create_text(x1, y1 + 10, text=f"{hist[-1][0]} épocas", fill=MUT, font=("Consolas", 8), anchor="e")
     paso = max(1, len(hist) // 300)
-    pts = [(px(n), py(v)) for n, v in hist[::paso]] + [(px(hist[-1][0]), py(hist[-1][1]))]
+    pts = [(px(epoch), py(value)) for epoch, value in hist[::paso]]
+    if pts[-1] != (px(hist[-1][0]), py(hist[-1][1])):
+        pts.append((px(hist[-1][0]), py(hist[-1][1])))
     if len(pts) > 1:
         c.create_line(*[q for p in pts for q in p], fill=ACC, width=2)
-    c.create_oval(pts[-1][0] - 4, pts[-1][1] - 4, pts[-1][0] + 4, pts[-1][1] + 4, fill=GOOD, outline="")
+    color = GOOD if m.mse() <= META_MSE else ACC
+    c.create_oval(pts[-1][0] - 4, pts[-1][1] - 4, pts[-1][0] + 4, pts[-1][1] + 4,
+                  fill=color, outline="")
+
+    c.create_text(8, 131, anchor="w", text="Tabla XOR: salida / clase predicha (umbral 0,5)",
+                  fill=TXT, font=("Helvetica", 9, "bold"))
+    for i, (x1, x2, target) in enumerate(DATOS_XOR):
+        output = m.salida((x1, x2))
+        predicted = int(output >= 0.5)
+        c.create_text(8, 151 + i * 15,
+                      anchor="w",
+                      text=f"e{i + 1} ({x1},{x2})  t={target}  o={output:.4f}  pred={predicted}",
+                      fill=GOOD if predicted == target else BAD,
+                      font=("Consolas", 9))
 
 
 class App:
     def __init__(self):
         self.r = tk.Tk()
-        self.r.title("Perceptrón multicapa XOR (e1) - UMNG")
+        self.r.title("Perceptrón multicapa XOR - UMNG")
         self.r.configure(bg=BG)
         self.f = None
         self.portada()
@@ -174,7 +210,9 @@ class App:
         f = self.nueva("1100x700")
         self.run = False
         self.m = MLP(W1_0, W2_0, ALPHA_0, B1_0, B2_0)
-        self.n, self.hist = 0, [(0, self.m.salida())]
+        self.modo, self.muestra = "demo", (X, T)
+        self.n, self.epocas = 0, 0
+        self.hist = [(0, self.m.mse())]
         izq = tk.Frame(f, bg=BG)
         izq.pack(side="left", padx=10)
         self.cn = tk.Canvas(izq, width=660, height=430, bg=BG, highlightthickness=0)
@@ -188,13 +226,7 @@ class App:
         self.st = self.lbl(d, "", 11, WARN, True, wraplength=330, height=3)
         self.st.pack(pady=4)
 
-        fm = tk.Frame(d, bg=PANEL)
-        fm.pack()
-        self.lbl(fm, "Meta de la salida:").pack(side="left")
-        self.meta = tk.StringVar(value="0.99")
-        om = tk.OptionMenu(fm, self.meta, *METAS, command=lambda v: self.pinta())
-        om.config(bg=BG, fg=TXT, highlightthickness=0, activebackground=PANEL, width=6)
-        om.pack(side="left", padx=6)
+        self.lbl(d, f"Parada del XOR completo: MSE ≤ {META_MSE}", 10, WARN, True).pack()
 
         self.al = tk.Scale(d, from_=0.05, to=5.0, resolution=0.05, orient="horizontal", length=300,
                           label="α  tasa de aprendizaje", bg=PANEL, fg=TXT,
@@ -202,28 +234,29 @@ class App:
         self.al.set(ALPHA_0)
         self.al.pack(fill="x", padx=20, pady=(8, 0))
         self.vel = tk.Scale(d, from_=1, to=5000, orient="horizontal", length=300,
-                           label="Velocidad: ciclos por paso en Auto", bg=PANEL, fg=TXT,
+                           label="Épocas por paso en Auto XOR", bg=PANEL, fg=TXT,
                            highlightthickness=0, troughcolor=BG)
         self.vel.set(10)
         self.vel.pack(fill="x", padx=20)
 
         b = tk.Frame(d, bg=PANEL)
         b.pack(pady=6)
-        self.btn(b, "▶ 1 ciclo", lambda: self.avanza(1)).grid(row=0, column=0, padx=3)
-        self.pl = self.btn(b, "⏵ Auto", self.auto, GOOD)
-        self.pl.grid(row=0, column=1, padx=3)
-        self.btn(b, "↺ Reiniciar", self.reinicia, WARN).grid(row=0, column=2, padx=3)
+        self.btn(b, "▶ Paso e1", self.paso_e1, ACC, 11).grid(row=0, column=0, padx=3, pady=2)
+        self.btn(b, "▶ Época XOR", self.epoca_xor, ACC, 12).grid(row=0, column=1, padx=3, pady=2)
+        self.btn(b, "↺ Reiniciar", self.reinicia, WARN, 11).grid(row=0, column=2, padx=3, pady=2)
+        self.pl = self.btn(b, "⏵ Auto XOR", self.auto, GOOD, 14)
+        self.pl.grid(row=1, column=0, columnspan=3, pady=2)
 
         fn = tk.Frame(d, bg=PANEL)
         fn.pack(pady=4)
         self.lbl(fn, "Avanzar").pack(side="left")
         self.nc = tk.Entry(fn, width=8, justify="center")
-        self.nc.insert(0, "1000")
+        self.nc.insert(0, "100")
         self.nc.pack(side="left", padx=4)
-        self.lbl(fn, "ciclos").pack(side="left")
+        self.lbl(fn, "épocas XOR").pack(side="left")
         self.btn(fn, "Ir", self.ir, ACC, 5).pack(side="left", padx=6)
 
-        self.lbl(d, "Pesos y sesgos iniciales (editables):", 10, MUT).pack(pady=(8, 0))
+        self.lbl(d, "Parámetros iniciales editables:", 10, MUT).pack(pady=(8, 0))
         gp = tk.Frame(d, bg=PANEL)
         gp.pack()
         self.en = {}
@@ -237,10 +270,9 @@ class App:
             self.en[nom] = e
         self.btn(d, "Aplicar pesos y reiniciar", self.reinicia, ACC, 24).pack(pady=(6, 2))
         self.btn(d, "Volver a los datos del ejercicio", self.datos, MUT, 24).pack()
+        self.info = self.lbl(d, "", 8, MUT, wraplength=360, justify="left")
+        self.info.pack(pady=4)
         self.pinta()
-
-    def meta_val(self):
-        return float(self.meta.get())
 
     def cambia_alpha(self, v):
         if hasattr(self, "m"):
@@ -253,70 +285,130 @@ class App:
         self.al.set(ALPHA_0)
         self.reinicia()
 
-    def reinicia(self):
-        self.run = False
-        self.pl.config(text="⏵ Auto")
+    def parametros(self):
         try:
             v = [float(self.en[k].get()) for k in self.en]
         except ValueError:
-            self.st.config(text="Escribe números válidos en los pesos", fg=BAD)
+            self.st.config(text="Escribe números válidos en pesos y sesgos", fg=BAD)
+            return None
+        if not all(math.isfinite(value) for value in v):
+            self.st.config(text="Los pesos y sesgos deben ser números finitos", fg=BAD)
+            return None
+        return v
+
+    def reinicia(self):
+        self.run = False
+        self.pl.config(text="⏵ Auto XOR")
+        v = self.parametros()
+        if v is None:
             return
         self.m = MLP([[v[0], v[1]], [v[2], v[3]]], [v[4], v[5]], self.al.get(),
                      [v[6], v[7]], v[8])
-        self.n, self.hist = 0, [(0, self.m.salida())]
+        self.modo, self.muestra = "demo", (X, T)
+        self.n, self.epocas = 0, 0
+        self.hist = [(0, self.m.mse())]
         self.pinta()
 
     def auto(self):
-        self.run = not self.run
-        self.pl.config(text="⏸ Pausa" if self.run else "⏵ Auto")
         if self.run:
-            self.tick()
+            self.run = False
+            self.pl.config(text="⏵ Auto XOR")
+            return
+        if not self.preparar_xor():
+            return
+        self.run = True
+        self.pl.config(text="⏸ Pausa")
+        self.tick()
 
     def tick(self):
         if self.run:
-            self.avanza(self.vel.get())
-            self.r.after(30, self.tick)
+            self.avanza_epocas(self.vel.get())
+            if self.run:
+                self.r.after(30, self.tick)
 
     def ir(self):
         try:
-            self.avanza(max(1, min(int(float(self.nc.get())), MAX_CICLOS)))
+            cantidad = int(self.nc.get())
         except ValueError:
-            self.st.config(text="Escribe un número de ciclos válido", fg=BAD)
-
-    def avanza(self, k):
-        meta = self.meta_val()
-        if self.m.salida() >= meta or self.n >= MAX_CICLOS:
+            self.st.config(text="Escribe una cantidad entera de épocas", fg=BAD)
             return
-        marca = max(1, k // 60)                    # puntos intermedios para que la curva sea suave
-        for _ in range(k):
-            self.m.paso()
-            self.n += 1
-            o = self.m.salida()
-            if o >= meta or self.n >= MAX_CICLOS:
+        self.avanza_epocas(max(1, min(cantidad, MAX_EPOCAS)))
+
+    def preparar_xor(self):
+        if self.modo == "xor":
+            return True
+        v = self.parametros()
+        if v is None:
+            return False
+        self.m = MLP([[v[0], v[1]], [v[2], v[3]]], [v[4], v[5]], self.al.get(),
+                     [v[6], v[7]], v[8])
+        self.modo, self.muestra = "xor", (X, T)
+        self.n, self.epocas = 0, 0
+        self.hist = [(0, self.m.mse())]
+        return True
+
+    def paso_e1(self):
+        self.run = False
+        self.pl.config(text="⏵ Auto XOR")
+        if self.modo != "demo":
+            self.reinicia()
+            if self.modo != "demo":
+                return
+        self.modo, self.muestra = "demo", (X, T)
+        self.m.paso(X, T)
+        self.n += 1
+        self.hist = [(0, self.m.mse())]
+        self.pinta()
+
+    def epoca_xor(self):
+        if not self.preparar_xor():
+            return
+        self.avanza_epocas(1)
+
+    def avanza_epocas(self, cantidad):
+        if not self.preparar_xor():
+            return
+        for _ in range(cantidad):
+            if self.epocas >= MAX_EPOCAS or self.m.mse() <= META_MSE:
                 break
-            if self.n % marca == 0:
-                self.hist.append((self.n, o))
-        self.hist.append((self.n, self.m.salida()))
+            self.m.entrenar_epoca()
+            self.epocas += 1
+            self.n += len(DATOS_XOR)
+            self.hist.append((self.epocas, self.m.mse()))
         if len(self.hist) > 2000:
             self.hist = self.hist[::2] + [self.hist[-1]]
         self.pinta()
 
     def pinta(self):
-        o, meta = self.m.salida(), self.meta_val()
-        dibuja_red(self.cn, self.m)
-        dibuja_grafica(self.cg, self.hist, meta, o)
-        self.cl.config(text=f"Ciclo {self.n}")
-        if o >= meta:
+        x, target = self.muestra
+        h, o = self.m.forward(x)
+        mse = self.m.mse()
+        dibuja_red(self.cn, self.m, x, target)
+        dibuja_grafica(self.cg, self.hist, self.m)
+        self.cl.config(text=f"Épocas {self.epocas}  |  Iteraciones (patrones) {self.n}")
+        self.info.config(
+            text=(f"W1 = [[{self.m.W1[0][0]:.4f}, {self.m.W1[0][1]:.4f}], "
+                  f"[{self.m.W1[1][0]:.4f}, {self.m.W1[1][1]:.4f}]]\n"
+                  f"W2 = [{self.m.W2[0]:.4f}, {self.m.W2[1]:.4f}]\n"
+                  f"Sesgos ocultos = [{self.m.B1[0]:.4f}, {self.m.B1[1]:.4f}]  "
+                  f"sesgo salida = {self.m.B2:.4f}"))
+        if self.modo == "xor" and mse <= META_MSE:
             self.run = False
-            self.pl.config(text="⏵ Auto")
-            self.st.config(text=f"🎉 ¡Llegó a la meta!\nSalida = {o:.5f} en el ciclo {self.n}", fg=GOOD)
-        elif self.n >= MAX_CICLOS:
+            self.pl.config(text="⏵ Auto XOR")
+            self.st.config(text=f"¡XOR entrenado! MSE = {mse:.5f}\n"
+                                f"{self.epocas} épocas, {self.n} iteraciones.", fg=GOOD)
+        elif self.modo == "xor" and self.epocas >= MAX_EPOCAS:
             self.run = False
-            self.st.config(text="Límite de ciclos alcanzado.\nSube α o cambia los pesos", fg=BAD)
+            self.pl.config(text="⏵ Auto XOR")
+            self.st.config(text=f"Límite de épocas alcanzado.\nMSE final = {mse:.5f}", fg=BAD)
+        elif self.modo == "xor":
+            self.st.config(text=f"Entrenando XOR completo…\nMSE = {mse:.5f} (meta ≤ {META_MSE})", fg=ACC)
         elif self.n == 0:
-            self.st.config(text=f"Estado inicial: salida {o:.4f}, error {T - o:.4f}\nPulsa ▶ 1 ciclo o ⏵ Auto", fg=WARN)
+            self.st.config(text=f"Estado inicial e1: h1={h[0]:.4f}, h2={h[1]:.4f}, "
+                                f"o1={o:.4f}\nMSE inicial del XOR = {mse:.5f}", fg=WARN)
         else:
-            self.st.config(text=f"Entrenando…  error = {T - o:.5f}", fg=ACC)
+            self.st.config(text=f"Demostración e1: salida = {o:.5f}, "
+                                f"error = {target - o:.5f}\nMSE del XOR completo = {mse:.5f}", fg=ACC)
 
 
 if __name__ == "__main__":
